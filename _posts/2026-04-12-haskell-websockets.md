@@ -46,7 +46,7 @@ data GameState = GameState {
     player1 :: Player,
     player2 :: Player,
     -- The channel will be updated each time a move is made to notify listening websockets
-    gameChan :: (TChan GameUpdate),
+    gameChan :: TChan GameUpdate,
 
     -- The number of connected websockets to this game
     gameConnections :: TVar ConnectionCount
@@ -298,11 +298,17 @@ websocketHandler app gameId = do
                     (handleOutgoingMessages websocketConnection gameState userId)
 ```
 
-We use [race_](https://hackage-content.haskell.org/package/async-2.2.6/docs/Control-Concurrent-Async.html#v:race_) to spawn two green threads. `handleIncomingMessages` will block on reading from the websocket connection (via `receiveData`) in a loop. It will validate and make any moves and inform other websockets of the move via the gameChan.  `handleOutgoingMessages` will read from the `gameChan` and send any updates to the websocket via `sendTextData`. When either `handleIncomingMessages` or `handleOutgoingMessages` fails on reading or writing to the socket due to the client being disconnected, `runResourceT` will run the `releaseGameState` function that we registered to run on resource deallocation in our `getGameState` function.
+We use [race_](https://hackage-content.haskell.org/package/async-2.2.6/docs/Control-Concurrent-Async.html#v:race_) to spawn two green threads to manage the Websocket connection.
+
+`handleIncomingMessages` will block on reading from the websocket connection (via `receiveData`) in a loop. It will validate and make any moves and inform other websockets of the move via the gameChan.  `handleOutgoingMessages` will read from the `gameChan` and send any updates to the websocket via `sendTextData`. 
+
+When either `handleIncomingMessages` or `handleOutgoingMessages` fails on reading or writing to the socket due to it being disconnected, `runResourceT` will run the `releaseGameState` function that we registered to run on resource deallocation in our `getGameState` function.
 
 If you want to see a full implementation (mostly vibe coded other than what we've discussed here) of our demo noughts and crosses server, I've uploaded it to github [here](https://github.com/Happy0/vibe-noughts-and-crosses-demo). The [NoughtsAndCrosses.hs](https://github.com/Happy0/vibe-noughts-and-crosses-demo/blob/main/src/Handler/NoughtsAndCrosses.hs) file contains all the logic we've been discussing in this blog entry.
 
+## Shared Resource Cache Library
+
 If you think you might find this pattern for sharing state between websockets (or other situations) useful, I've published it as a library named [shared-resource-cache](https://hackage.haskell.org/package/shared-resource-cache). Source [here](https://github.com/Happy0/shared-resource-cache). 
 
-*Note*: it works slightly different in that even when there are no 'sharers' of the given resource, it is not cleared from the cache until it has 'timed out' according to the passed in configuration.
+*Note*: it works slightly differently to what we've explored here: when there are no 'sharers' of the given resource, it is not cleared from the cache immediately. Instead, it is cleared when there has been no sharers for at least a configured amount of time.
 
