@@ -1,4 +1,5 @@
 ---
+layout: post
 title: "A Pattern for Sharing Data Between Websockets in Haskell"
 date: 2026-04-12
 ---
