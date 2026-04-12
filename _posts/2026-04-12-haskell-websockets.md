@@ -17,11 +17,11 @@ For simplicity, we'll implement a multiplayer Noughts and Crosses (as we'll call
 
 ## The Core Game Server 
 
-The canonical examples on Yesod WebSockets illustate how to use a shared broadcast TChan as the basis for a chat server (blog [here](https://www.yesodweb.com/blog/2014/03/wai-yesod-websockets), code example (here)[https://github.com/yesodweb/yesod/blob/master/yesod-websockets/chat.hs].) 
+The canonical examples on Yesod WebSockets illustate how to use a shared broadcast TChan as the basis for a chat server (blog [here](https://www.yesodweb.com/blog/2014/03/wai-yesod-websockets), code example [here](https://github.com/yesodweb/yesod/blob/master/yesod-websockets/chat.hs).)) 
 
 This shared TChan broadcast channel is a useful abstraction which will form part of our implementation but unlike the materials above we'll focus on a pattern for having multiple games active at one time. 
 
-A naive approach might be to plonk our games in a `Map GameId GameState` type inside a mutable variable using (TVar)[https://hackage.haskell.org/package/stm-2.4.2/docs/Control-Concurrent-STM-TVar.html] that's populated with a given game when at least one WebSocket needs access to the game to play moves or spectate it. Here we'll set up our `GameState` types including our board state, our two players, channel to broadcast moves, etc as well as our game map:
+A naive approach might be to plonk our games in a `Map GameId GameState` type inside a mutable variable using [TVar](https://hackage.haskell.org/package/stm-2.4.2/docs/Control-Concurrent-STM-TVar.html) that's populated with a given game when at least one WebSocket needs access to the game to play moves or spectate it. Here we'll set up our `GameState` types including our board state, our two players, channel to broadcast moves, etc as well as our game map:
 
 ```haskell
 type GameId = T.Text
@@ -57,7 +57,7 @@ data GameMap = TVar (Map GameId GameState)
 
 Since we're using a TVar each WebSocket thread can load the game into the game map if necessary by running `modifyTVar` to update the map.
 
-That just won't do though! Only one thread can update the map entries at a time, and we have aspirations of being the Internet's go-to Noughts and Crosses server! We'll need something that scales better than that while we've still got the luxury of vertically scaling one machine along our path to world domination. (stm-containers)[https://nikita-volkov.github.io/stm-containers/] to the rescue! It uses a Hash Array Mapped Trie datastructure to split the map into chunks that can be updated inside independent STM transactions allowing for more concurrency.
+That just won't do though! Only one thread can update the map entries at a time, and we have aspirations of being the Internet's go-to Noughts and Crosses server! We'll need something that scales better than that while we've still got the luxury of vertically scaling one machine along our path to world domination. [stm-containers](https://nikita-volkov.github.io/stm-containers/) to the rescue! It uses a Hash Array Mapped Trie datastructure to split the map into chunks that can be updated inside independent STM transactions allowing for more concurrency.
 
 ```
 import qualified StmContainers.Map as M
@@ -86,7 +86,7 @@ loadGame :: GameRepository -> GameId -> IO (Either Text GameEntity)
 
 We will leverage this function to load the game into the cache when it's not already populated.
 
-We will use (Software Transactional Memory (STM))[https://academy.fpblock.com/haskell/library/stm/] abstraction to ensure that if two websocket connections try to insert an entry into the game map at the same time, they both end up with the same 'GameState' instance so that they receive game updates on the broadcast channel.
+We will use [Software Transactional Memory (STM)](https://academy.fpblock.com/haskell/library/stm/) abstraction to ensure that if two websocket connections try to insert an entry into the game map at the same time, they both end up with the same 'GameState' instance so that they receive game updates on the broadcast channel.
 
 ```haskell
 getGameState :: GameRepository -> GameMap -> GameId -> IO (Either Text GameState)
@@ -145,7 +145,7 @@ This means that if there is a conflict in the middle of the transaction because 
 
 There's a small improvement we can make to make sure that multiple threads don't try to load our game at the same time, wasting trips to the database just to throw the result away. This could happen in a thundering herd of observers to watch the latest tournament game between Noughts and Crosses grandmasters!
 
-We will use an (MVar)[https://hackage-content.haskell.org/package/base-4.22.0.0/docs/Control-Concurrent-MVar.html] to allow a thread to lay claim to responsibility for loading the resource and signal any other threads waiting when it has done so. 
+We will use an [MVar](https://hackage-content.haskell.org/package/base-4.22.0.0/docs/Control-Concurrent-MVar.html) to allow a thread to lay claim to responsibility for loading the resource and signal any other threads waiting when it has done so. 
 
 The game entry in our game map will now either be a game loaded into the cache or an MVar that can be awaited (blocked on) signalling that the game has been loaded into the cache:
 
@@ -193,7 +193,7 @@ getGameState gameRepository gameMap gameId = do
             loadAndPublish ownedMvar
 ```
 
-This is performed in an STM transaction, so if multiple threads try to insert their 'MVar' claiming ownership then the losers of the race will retry the transaction and see the winning thread's claim. They will then block on it being populated by the other thread using using (readMVar)[https://hackage-content.haskell.org/package/base-4.22.0.0/docs/Control-Concurrent-MVar.html#v:readMVar], which serves as a signal that they can now load the game from the cache.
+This is performed in an STM transaction, so if multiple threads try to insert their 'MVar' claiming ownership then the losers of the race will retry the transaction and see the winning thread's claim. They will then block on it being populated by the other thread using using [readMVar](https://hackage-content.haskell.org/package/base-4.22.0.0/docs/Control-Concurrent-MVar.html#v:readMVar), which serves as a signal that they can now load the game from the cache.
 
 When loading the resource we must make sure that threads don't wait on the MVar indefinetly if an error is thrown while retrieving the game:
 
@@ -232,9 +232,9 @@ When loading the resource we must make sure that threads don't wait on the MVar 
 
 Our last challenge is to make sure that entries are removed from the cache when it's safe to do so (there are no websocket subscriptions.) Our Noughts and Crosses server will be very busy with many games being started and ended and we can't have ourselves running out of heap space due to a memory leak of games remaining in the cache!
 
-When we think of garaunteeing the safe release of scarce resources, one of the options our mind turns to the (resourcet)[https://hackage.haskell.org/package/resourcet] package.
+When we think of garaunteeing the safe release of scarce resources, one of the options our mind turns to the [resourcet](https://hackage.haskell.org/package/resourcet) package.
 
-We will use the resourcet package's (allocate)[https://hackage.haskell.org/package/resourcet-1.3.0/docs/Control-Monad-Trans-Resource.html#v:allocate] function to register the action that must be taken when the game resource is no longer in scope (due to the websocket disconnecting or an exception being thrown.)
+We will use the resourcet package's [allocate](https://hackage.haskell.org/package/resourcet-1.3.0/docs/Control-Monad-Trans-Resource.html#v:allocate) function to register the action that must be taken when the game resource is no longer in scope (due to the websocket disconnecting or an exception being thrown.)
 
 We have the 'gameConnections' variable already tracking the number of websocket handlers that are subscribed to the game. On connection, we will increment it as usual and on disconnection if the connection count has reached 0 we will remove it from the cache:
 
@@ -298,11 +298,11 @@ websocketHandler app gameId = do
                     (handleOutgoingMessages websocketConnection gameState userId)
 ```
 
-We use (race_ )[https://hackage-content.haskell.org/package/async-2.2.6/docs/Control-Concurrent-Async.html#v:race_] to spawn two green threads. `handleIncomingMessages` will block on reading from the websocket connection (via `receiveData`) in a loop. It will validate and make any moves and inform other websockets of the move via the gameChan.  `handleOutgoingMessages` will read from the `gameChan` and send any updates to the websocket via `sendTextData`. When either `handleIncomingMessages` or `handleOutgoingMessages` fails on reading or writing to the socket due to the client being disconnected, `runResourceT` will run the `releaseGameState` function that we registered to run on resource deallocation in our `getGameState` function.
+We use [race_](https://hackage-content.haskell.org/package/async-2.2.6/docs/Control-Concurrent-Async.html#v:race_) to spawn two green threads. `handleIncomingMessages` will block on reading from the websocket connection (via `receiveData`) in a loop. It will validate and make any moves and inform other websockets of the move via the gameChan.  `handleOutgoingMessages` will read from the `gameChan` and send any updates to the websocket via `sendTextData`. When either `handleIncomingMessages` or `handleOutgoingMessages` fails on reading or writing to the socket due to the client being disconnected, `runResourceT` will run the `releaseGameState` function that we registered to run on resource deallocation in our `getGameState` function.
 
-If you want to see a full implementation (mostly vibe coded other than what we've discussed here) of our demo noughts and crosses server, I've uploaded it to github (here)[https://github.com/Happy0/vibe-noughts-and-crosses-demo]. The (NoughtsAndCrosses.hs)[https://github.com/Happy0/vibe-noughts-and-crosses-demo/blob/main/src/Handler/NoughtsAndCrosses.hs] file contains all the logic we've been discussing in this blog entry.
+If you want to see a full implementation (mostly vibe coded other than what we've discussed here) of our demo noughts and crosses server, I've uploaded it to github [here](https://github.com/Happy0/vibe-noughts-and-crosses-demo). The [NoughtsAndCrosses.hs](https://github.com/Happy0/vibe-noughts-and-crosses-demo/blob/main/src/Handler/NoughtsAndCrosses.hs) file contains all the logic we've been discussing in this blog entry.
 
-If you think you might find this pattern for sharing state between websockets (or other situations) useful, I've published it as a library named (shared-resource-cache)[https://hackage.haskell.org/package/shared-resource-cache]. Source (here)[https://github.com/Happy0/shared-resource-cache]. 
+If you think you might find this pattern for sharing state between websockets (or other situations) useful, I've published it as a library named [shared-resource-cache](https://hackage.haskell.org/package/shared-resource-cache). Source [here](https://github.com/Happy0/shared-resource-cache). 
 
 *Note*: it works slightly different in that even when there are no 'sharers' of the given resource, it is not cleared from the cache until it has 'timed out' according to the passed in configuration.
 
