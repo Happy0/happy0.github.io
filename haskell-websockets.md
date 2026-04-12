@@ -79,40 +79,40 @@ We will use (Software Transactional Memory (STM))[https://academy.fpblock.com/ha
 
 ```
 getGameState :: GameRepository -> GameMap -> GameId -> IO (Either Text GameState)
-getGameState gameRepository gameMap gameId =
-    -- If getting the game from the cache fails we try loading it into the cache instead using the <|> (alternative) function
-    runExceptT $ mapExceptT atomically getCachedEntry <|> loadCachedEntry
-  where
-    getCachedEntry :: ExceptT Text STM GameState
-    getCachedEntry = ExceptT $ do
+getGameState gameRepository gameMap gameId = do
+    existing <- atomically $ do
         cached <- M.lookup gameId gameMap
         case cached of
-            Just gameState -> Right <$> registerSharer gameState
-            -- Using mempty here means an error returned from 'loadCachedEntry' will take precedence over this error due to the semantics of
-            -- the <|> function (arguably a bit hacky :P)
-            Nothing -> return $ Left mempty
-
-    loadCachedEntry :: ExceptT Text IO GameState
-    loadCachedEntry = do
-        entity <- ExceptT $ loadGame gameRepository gameId
-        freshState <- liftIO $ mapGameState entity
-        -- It's important we recheck in the same transaction as writing the entry to the cache
-        -- that another thread hasn't inserted it into the cache in the meantime so that we 
-        -- can make sure we're sharing the same TVars and channels, etc
-        mapExceptT atomically $ getCachedEntry <|> lift (insertFresh freshState)
-
-    insertFresh :: GameState -> STM GameState
-    insertFresh freshState = do
-        M.insert freshState gameId gameMap
-        registerSharer freshState
-
+            Just gameState -> Just <$> registerSharer gameState
+            Nothing -> return Nothing
+    case existing of
+        Just gameState ->
+            return $ Right gameState
+        Nothing -> do
+            loaded <- loadGame gameRepository gameId
+            case loaded of
+                Left err ->
+                    return $ Left err
+                Right entity -> do
+                    freshState <- mapGameState entity
+                    -- It's important we recheck in the same transaction as writing the entry
+                    -- to the cache that another thread hasn't inserted it in the meantime so
+                    -- that we can make sure we're sharing the same TVars and channels, etc
+                    atomically $ do
+                        cached' <- M.lookup gameId gameMap
+                        case cached' of
+                            Just gameState -> Right <$> registerSharer gameState
+                            Nothing -> do
+                                M.insert freshState gameId gameMap
+                                Right <$> registerSharer freshState
+  where
     registerSharer :: GameState -> STM GameState
     registerSharer gameState = do
         modifyTVar' (gameConnections gameState) (+ 1)
         return gameState
 
     mapGameState :: GameEntity -> IO GameState
-    mapGameState GameEntity { gameEntityBohttps://hackage.haskell.org/package/shared-resource-cacheard = b, gameEntityPlayer1 = p1, gameEntityPlayer2 = p2 } = do
+    mapGameState GameEntity { gameEntityBoard = b, gameEntityPlayer1 = p1, gameEntityPlayer2 = p2 } = do
         boardVar <- newTVarIO b
         chan <- newBroadcastTChanIO
         connVar <- newTVarIO 0
@@ -130,7 +130,7 @@ In our `loadCachedEntry` function, in an STM transaction we check if the item is
 This means that if there is a conflict in the middle of the transaction because another websocket thread has updated our cache in another parallel transaction, the transaction will be retried and both threads will end up with the same 'gamestate' entry and see the same updates sent via the shared broadcast channel, etc.
 
 
-## Taming the Thundering Herd
+## Taming the Herd
 
 There's a small improvement we can make to make sure that multiple threads don't try to load our game at the same time, wasting trips to the database just to throw the result away. This could happen in a thundering herd of observers to watch the latest tournament game between Noughts and Crosses grandmasters!
 
