@@ -1,3 +1,8 @@
+---
+title: "A Pattern for Sharing Data Between Websockets in Haskell"
+date: 2026-04-12
+---
+
 # A Pattern for Sharing Data Between Websockets in Haskell
 
 I'd like to share a wee pattern I've found useful for writing simple WebSocket apps in Haskell - specifically for [wordify](https://wordify.gordo.life) - a ~ crossword board game ~ - a bit like https://woogles.io/ .
@@ -17,7 +22,7 @@ This shared TChan broadcast channel is a useful abstraction which will form part
 
 A naive approach might be to plonk our games in a `Map GameId GameState` type inside a mutable variable using (TVar)[https://hackage.haskell.org/package/stm-2.4.2/docs/Control-Concurrent-STM-TVar.html] that's populated with a given game when at least one WebSocket needs access to the game to play moves or spectate it. Here we'll set up our `GameState` types including our board state, our two players, channel to broadcast moves, etc as well as our game map:
 
-```
+```haskell
 type GameId = T.Text
 data Player = Player { username ::T.Text, userId:: T.Text }
 type ConnectionCount = Int
@@ -64,11 +69,11 @@ Our next challenge is to load the game state into the game map when the first we
 
 Imagine our Yesod 'App' type had a GameRepository that was a data store we could use to access our persisted TicTacToe games:
 
-```
+```haskell
 data App = App { gameRepository :: GameRepository }
 ```
 
-```
+```haskell
 data GameEntity = GameEntity {
     gameEntityBoard :: Board,
     gameEntityPlayer1 :: Player,
@@ -82,7 +87,7 @@ We will leverage this function to load the game into the cache when it's not alr
 
 We will use (Software Transactional Memory (STM))[https://academy.fpblock.com/haskell/library/stm/] abstraction to ensure that if two websocket connections try to insert an entry into the game map at the same time, they both end up with the same 'GameState' instance so that they receive game updates on the broadcast channel.
 
-```
+```haskell
 getGameState :: GameRepository -> GameMap -> GameId -> IO (Either Text GameState)
 getGameState gameRepository gameMap gameId = do
     existing <- atomically $ do
@@ -150,7 +155,7 @@ type GameMap = M.Map GameId GameEntry
 
 When we first try to retrieve a game, we have to decide the action we need to take based on the cache state, which we represent with this type:
 
-```
+```haskell
 data CacheDecision
     -- The game is already in the cache
     = Hit GameState
@@ -162,7 +167,7 @@ data CacheDecision
 
 When we load a game we transactionally lay claim to loading the resource if it's not already loaded or is currently being loaded by writing a 'LoadingGame' entry to cache:
 
-```
+```haskell
 getGameState :: GameRepository -> GameMap -> GameId -> IO (Either Text GameState)
 getGameState gameRepository gameMap gameId = do
     pendingMvar <- newEmptyMVar
@@ -191,7 +196,7 @@ This is performed in an STM transaction, so if multiple threads try to insert th
 
 When loading the resource we must make sure that threads don't wait on the MVar indefinetly if an error is thrown while retrieving the game:
 
-```
+```haskell
     loadAndPublish :: MVar () -> IO (Either Text GameState)
     loadAndPublish ownedMvar = do
         attempted <- tryLoad
@@ -232,7 +237,7 @@ We will use the resourcet package's (allocate)[https://hackage.haskell.org/packa
 
 We have the 'gameConnections' variable already tracking the number of websocket handlers that are subscribed to the game. On connection, we will increment it as usual and on disconnection if the connection count has reached 0 we will remove it from the cache:
 
-```
+```haskell
 getGameState :: MonadResource m => GameRepository -> GameMap -> GameId -> m (Either Text GameState)
 getGameState gameRepository gameMap gameId = do
     (_releaseKey, result) <- allocate acquireGameState releaseGameState
@@ -277,7 +282,7 @@ Again, the STM abstraction has served us well: if a new websocket connection ret
 
 We can now use this game 'resource' in our websocket handler inside `runResourceT`:
 
-```
+```haskell
 websocketHandler :: App -> GameId -> WebSocketsT Handler ()
 websocketHandler app gameId = do
     userId <- lift requireAuthId
@@ -294,107 +299,7 @@ websocketHandler app gameId = do
 
 We use (race_ )[https://hackage-content.haskell.org/package/async-2.2.6/docs/Control-Concurrent-Async.html#v:race_] to spawn two green threads. `handleIncomingMessages` will block on reading from the websocket connection (via `receiveData`) in a loop. It will validate and make any moves and inform other websockets of the move via the gameChan.  `handleOutgoingMessages` will read from the `gameChan` and send any updates to the websocket via `sendTextData`. When either `handleIncomingMessages` or `handleOutgoingMessages` fails on reading or writing to the socket due to the client being disconnected, `runResourceT` will run the `releaseGameState` function that we registered to run on resource deallocation in our `getGameState` function.
 
-For completeness, here is the rest of our websocket server:
-
-```
-handleIncomingMessages :: Connection -> GameState -> UserId -> IO ()
-handleIncomingMessages conn gameState usrId = forever $ do
-    msg <- receiveData conn :: IO T.Text
-    case readMaybe (T.unpack msg) :: Maybe Int of
-        Nothing ->
-            sendError conn "Invalid message — send a board position (0-8)"
-        Just pos -> do
-            result <- atomically $ tryMakeMove gameState usrId pos
-            case result of
-                Left err -> sendError conn err
-                Right () -> return ()
-
-handleOutgoingMessages :: Connection -> GameState -> UserId -> IO ()
-handleOutgoingMessages conn gameState _usrId = do
-    -- Dup and read in the same transaction so we don't miss any updates
-    -- that land between the two operations.
-    (chan, initialBoard) <- atomically $ do
-        c <- dupTChan (gameChan gameState)
-        b <- readTVar (board gameState)
-        return (c, b)
-    sendBoardState conn initialBoard
-    forever $ do
-        NewBoard newBoard <- atomically $ readTChan chan
-        sendBoardState conn newBoard
-
--- Messaging helpers
-
-sendBoardState :: Connection -> Board -> IO ()
-sendBoardState conn b = sendTextData conn $ encodeToLazyText $ object
-    [ "board"    .= b
-    , "turn"     .= currentTurn b
-    , "winner"   .= checkWinner b
-    , "gameOver" .= (checkWinner b /= Nothing || isBoardFull b)
-    ]
-
-sendError :: Connection -> Text -> IO ()
-sendError conn err = sendTextData conn $ encodeToLazyText $ object
-    [ "error" .= err ]
-
--- Game logic
-
-tryMakeMove :: GameState -> UserId -> Int -> STM (Either Text ())
-tryMakeMove gameState usrId pos = do
-    b <- readTVar (board gameState)
-    case getPlayerMark gameState usrId of
-        Nothing -> return $ Left "You are not a player in this game"
-        Just mark
-            | checkWinner b /= Nothing -> return $ Left "Game is already over"
-            | currentTurn b /= mark    -> return $ Left "Not your turn"
-            | otherwise -> case squareAt b pos of
-                Nothing    -> return $ Left "Position out of range"
-                Just sq
-                    | sq /= Empty -> return $ Left "Square already occupied"
-                    | otherwise -> do
-                        let newBoard = applyMove b pos mark
-                        writeTVar (board gameState) newBoard
-                        writeTChan (gameChan gameState) (NewBoard newBoard)
-                        return $ Right ()
-
-getPlayerMark :: GameState -> UserId -> Maybe Square
-getPlayerMark gs uid
-    | userId (player1 gs) == uid = Just X
-    | userId (player2 gs) == uid = Just O
-    | otherwise = Nothing
-
-currentTurn :: Board -> Square
-currentTurn b =
-    let xs = length (filter (== X) b)
-        os = length (filter (== O) b)
-    in if xs <= os then X else O
-
-applyMove :: Board -> Int -> Square -> Board
-applyMove b pos mark = take pos b ++ [mark] ++ drop (pos + 1) b
-
-checkWinner :: Board -> Maybe Square
-checkWinner b = listToMaybe
-    [ mark
-    | (first:rest) <- winningLines
-    , Just mark <- [squareAt b first]
-    , mark /= Empty
-    , all (\i -> squareAt b i == Just mark) rest
-    ]
-
-squareAt :: Board -> Int -> Maybe Square
-squareAt bs i
-    | i < 0     = Nothing
-    | otherwise = listToMaybe (drop i bs)
-
-isBoardFull :: Board -> Bool
-isBoardFull = all (/= Empty)
-
-winningLines :: [[Int]]
-winningLines =
-    [ [0,1,2], [3,4,5], [6,7,8]  -- rows
-    , [0,3,6], [1,4,7], [2,5,8]  -- columns
-    , [0,4,8], [2,4,6]            -- diagonals
-    ]
-```
+If you want to see a full implementation (mostly vibe coded other than what we've discussed here) of our demo noughts and crosses server, I've uploaded it to github (here)[https://github.com/Happy0/vibe-noughts-and-crosses-demo]. The (NoughtsAndCrosses.hs)[https://github.com/Happy0/vibe-noughts-and-crosses-demo/blob/main/src/Handler/NoughtsAndCrosses.hs] file contains all the logic we've been discussing in this blog entry.
 
 If you think you might find this pattern for sharing state between websockets (or other situations) useful, I've published it as a library named (shared-resource-cache)[https://hackage.haskell.org/package/shared-resource-cache]. Source (here)[https://github.com/Happy0/shared-resource-cache]. 
 
