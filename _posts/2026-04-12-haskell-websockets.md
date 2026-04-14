@@ -332,7 +332,7 @@ Again, the STM abstraction has served us well. The transaction inside `atomicall
 
 If a new websocket connection retrieves the game from the cache at the same time as it is being removed in another transaction, either:
 * The transaction removing the cache entry is restarted, meaning the websocket doesn't end up with an orphaned game state and channel it will never get updates on
-* The transaction retrieving the item from the cache is aborted, meaning the websocket thread has to insert it threshly and it will be visible to other websockets
+* Or the transaction retrieving the item from the cache is aborted, meaning the websocket thread has to insert it threshly and it will be visible to other websockets
 
 We can now use this game 'resource' in our websocket handler inside `runResourceT`:
 
