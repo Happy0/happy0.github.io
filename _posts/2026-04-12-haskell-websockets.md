@@ -281,7 +281,7 @@ When loading the resource we must make sure that threads don't wait on the MVar 
 
 Our last challenge is to make sure that entries are removed from the cache when it's safe to do so (there are no websocket subscriptions.) Our Noughts and Crosses server will be very busy with many games being started and ended and we can't have ourselves running out of heap space due to a memory leak of games remaining in the cache!
 
-When we think of garaunteeing the safe release of scarce resources, one of the options our mind turns to is the [resourcet](https://hackage.haskell.org/package/resourcet) package. This package
+When we think of garaunteeing the safe release of scarce resources, one of the options our mind turns to is the [resourcet](https://hackage.haskell.org/package/resourcet) package. This package allows us to use the type system to make sure a resource will be cleaned up when it is no longer being used. See [this blog entry](https://www.yesodweb.com/blog/2011/12/resourcet) for more on how it works if you are unfamilar with it.
 
 We will use the resourcet package's [allocate](https://hackage.haskell.org/package/resourcet-1.3.0/docs/Control-Monad-Trans-Resource.html#v:allocate) function to register the action that must be taken when the game resource is no longer in scope (due to the websocket disconnecting or an exception being thrown.)
 
@@ -326,7 +326,7 @@ getGameState gameRepository gameMap gameId = do
         when (remaining <= 0) $ M.delete gameId gameMap
 ```
 
-We registered the `releaseGameState` function as the function that should be ran when the resource goes out of scope.
+We registered the `releaseGameState` function as the function that should be ran when the resource goes out of scope. It will check if there's any sharers left, and if there are not it will remove the game from the game map.
 
 Again, the STM abstraction has served us well. The transaction inside `atomically` will be restarted if either the 'gameConnections' TVar or game map is updated by another websocket thread.
 
