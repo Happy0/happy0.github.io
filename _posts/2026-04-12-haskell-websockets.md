@@ -353,9 +353,11 @@ websocketHandler app gameId = do
 
 We use [race_](https://hackage-content.haskell.org/package/async-2.2.6/docs/Control-Concurrent-Async.html#v:race_) to spawn two green threads to manage the Websocket connection.
 
-`handleIncomingMessages` will block on reading from the websocket connection (via `receiveData`) in a loop. It will validate and make any moves and inform other websockets of the move via the gameChan.  `handleOutgoingMessages` will read from the `gameChan` and send any updates to the websocket via `sendTextData`. 
+`handleOutgoingMessages` will read from the shared broadcast channel and write to the websocket to inform the client of board changes.
 
-When either `handleIncomingMessages` or `handleOutgoingMessages` fails on reading or writing to the socket due to it being disconnected, `runResourceT` will run the `releaseGameState` function that we registered to run on resource deallocation in our `getGameState` function.
+`handleIncomingMessages` will read from the websocket to make moves on behalf of the user. It will validate the move, update the state and write to the shared broadcast channel.
+
+When either `handleIncomingMessages` or `handleOutgoingMessages` fails on reading or writing to the socket due to it being disconnected, `runResourceT` will catch the error and run the `releaseGameState` function that we registered to run on resource deallocation in our `getGameState` function before rethrowing the error.
 
 If you want to see a full implementation (mostly vibe coded other than what we've discussed here) of our demo noughts and crosses server, I've uploaded it to github [here](https://github.com/Happy0/vibe-noughts-and-crosses-demo). The [NoughtsAndCrosses.hs](https://github.com/Happy0/vibe-noughts-and-crosses-demo/blob/main/src/Handler/NoughtsAndCrosses.hs) file contains all the logic we've been discussing in this blog entry.
 
