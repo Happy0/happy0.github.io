@@ -336,6 +336,8 @@ If a new websocket connection retrieves the game from the cache at the same time
 * The transaction removing the cache entry is restarted, meaning the websocket doesn't end up with an orphaned game state and channel it will never get updates on
 * Or the transaction retrieving the item from the cache is aborted, meaning the websocket thread has to insert it threshly and it will be visible to other websockets
 
+*Note*: the conditional deletion can be achieved slightly more efficiently with stm-container's [focus](https://hackage-content.haskell.org/package/stm-containers-1.2.2/docs/StmContainers-Map.html#v:focus) function to avoid having to traverse the map a second time to do the deletion.
+
 We can now use this game 'resource' in our websocket handler inside `runResourceT`:
 
 ```haskell
