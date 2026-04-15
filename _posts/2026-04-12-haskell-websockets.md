@@ -13,6 +13,8 @@ I have in mind websocket applications where there's some sort of 'resource' that
 
 For simplicity, we'll implement a multiplayer server for Noughts and Crosses (as we'll call it in a parochially defiant act of patriotism against the US-centric internet :P) to illustrate the pattern.
 
+I'll be exploring a pattern where we can use to maintain a Map of all the Noughts and Crosses games we have in progress safely in a way that all the connected websockets see the same game updates.
+
 ## The Core Game Server 
 
 There's a few different options for writing web apps in haskell. Yesod is the one I'm most familiar with. The canonical examples on Yesod WebSockets illustate how to use a shared broadcast [TChan](https://hackage.haskell.org/package/stm-2.5.3.1/docs/Control-Concurrent-STM-TChan.html) as the basis for a chat server (blog [here](https://www.yesodweb.com/blog/2014/03/wai-yesod-websockets), code example [here](https://github.com/yesodweb/yesod/blob/master/yesod-websockets/chat.hs).))
@@ -44,9 +46,9 @@ main = do
     warp 3000 $ App chan
 ```
 
-In these examples, a global channel is accessed via `getYesod` which holds the channel state. It is duplicated by each Websocket to subscribe to new messages in the chatroom.
+In these examples, a global channel is accessed via `getYesod` which holds the channel state. It is duplicated by each websocket to subscribe to new messages in the chatroom.
 
-This shared TChan broadcast channel is a useful abstraction which will form part of our implementation but unlike the materials above we'll focus on a pattern for having multiple games active at one time. 
+This shared TChan broadcast channel is a useful abstraction which will form part of our implementation but unlike the materials above we'll need to maintain multiple gmaes at once with their own channel. 
 
 A naive approach might be to plonk our games in a `Map GameId GameState` stored in a [TVar](https://hackage.haskell.org/package/stm-2.4.2/docs/Control-Concurrent-STM-TVar.html). A TVar is a mutable variable that can be updated by multiple threads (or websocket handlers) and can be updated transactionally along with other TVars (which we'll get into later.) 
 
@@ -361,9 +363,11 @@ When either `handleIncomingMessages` or `handleOutgoingMessages` fails on readin
 
 If you want to see a full implementation (mostly vibe coded other than what we've discussed here) of our demo noughts and crosses server, I've uploaded it to github [here](https://github.com/Happy0/vibe-noughts-and-crosses-demo). The [NoughtsAndCrosses.hs](https://github.com/Happy0/vibe-noughts-and-crosses-demo/blob/main/src/Handler/NoughtsAndCrosses.hs) file contains all the logic we've been discussing in this blog entry.
 
-## Shared Resource Cache Library
+## Conclusion
 
-If you think you might find this pattern for sharing state between websockets (or other situations) useful, I've published it as a library named [shared-resource-cache](https://hackage.haskell.org/package/shared-resource-cache). Source [here](https://github.com/Happy0/shared-resource-cache). 
+This pattern can be applied in any situation where it's important that multiple threads need to share the same reference to something that is dynamically loaded. This is a requirement beyond that of a traditional cache where it doesn't particularly matter if an item is evicted from the cache (per some eviction policy) while there's still threads holding on to it, for example.
+
+If you think you might find this pattern useful for something, I've published it as a library named [shared-resource-cache](https://hackage.haskell.org/package/shared-resource-cache). Source [here](https://github.com/Happy0/shared-resource-cache). 
 
 *Note*: it works slightly differently to what we've explored here: when there are no 'sharers' of the given resource, it is not cleared from the cache immediately. Instead, it is cleared when there has been no sharers for at least a configured amount of time.
 
