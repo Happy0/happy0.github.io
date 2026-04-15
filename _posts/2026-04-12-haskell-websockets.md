@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "Writing a Websocket Turn Based Game Server in Haskell"
+title: "Writing a Turn Based Game Websocket Server in Haskell"
 date: 2026-04-12
 ---
 
@@ -13,7 +13,7 @@ I have in mind websocket applications where there's some sort of 'resource' that
 
 For simplicity, we'll implement a multiplayer server for Noughts and Crosses (as we'll call it in a parochially defiant act of patriotism against the US-centric internet :P) to illustrate the pattern.
 
-I'll be exploring a pattern where we can use to maintain a Map of all the Noughts and Crosses games we have in progress safely in a way that all the connected websockets see the same game updates.
+I'll be exploring a pattern where we maintain a Map of all the Noughts and Crosses games we have in progress safely such that that all the connected websockets see the same game updates.
 
 ## The Core Game Server 
 
