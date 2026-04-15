@@ -156,6 +156,7 @@ getGameState gameRepository gameMap gameId = do
                 Left err ->
                     return $ Left err
                 Right entity -> do
+                    -- Set up the shared board state TVar and channel, etc
                     freshState <- mapGameState entity
                     -- It's important we recheck in the same transaction as writing the entry
                     -- to the cache that another thread hasn't inserted it in the meantime so
@@ -187,9 +188,9 @@ getGameState gameRepository gameMap gameId = do
             }
 ```
 
-In our `loadCachedEntry` function, in an STM transaction (via the [atomically](https://hackage.haskell.org/package/stm-2.5.3.1/docs/Control-Monad-STM.html#v:atomically) function) we check if the item is already in the cache (via `getCachedEntry`) and if it is not we insert it and return the newly inserted game entry.
+In our `getGameState` function, if we don't find the game already present in our game map then we attempt to load it freshly and insert it into the map. We do this insertion inside an STM transaction via the [atomically](https://hackage.haskell.org/package/stm-2.5.3.1/docs/Control-Monad-STM.html#v:atomically) function.
 
-This means that if there is a conflict in the middle of the transaction because another websocket thread has updated our cache in another concurrent transaction, the transaction will be retried and both threads will end up with the same game entry and see the same updates sent via the shared broadcast channel, etc.
+This means that if there is a conflict in the middle of the transaction because one or more other websocket threads have tried to load the game in another concurrent transaction, the transaction inside the `atomically` 'block' will be retried by the unsuccessful writing websocket threads. They will then read the newly inserted entry and increment the sharer count via `registerSharer`, meaning  that all threads are reading from the same broadcast channel.
 
 
 ## Taming the Herd
