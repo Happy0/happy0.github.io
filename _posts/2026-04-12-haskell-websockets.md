@@ -13,7 +13,7 @@ I have in mind websocket applications where there's some sort of 'resource' that
 
 For simplicity, we'll implement a multiplayer server for Noughts and Crosses (as we'll call it in a parochially defiant act of patriotism against the US-centric internet :P) to illustrate the pattern.
 
-I'll be exploring a pattern where we maintain a Map of all the Noughts and Crosses games we have in progress safely such that that all the connected websockets see the same game updates.
+I'll be exploring a pattern where we maintain a Map of all the Noughts and Crosses games we have in progress safely such that all the connected websockets see the same game updates.
 
 ## The Core Game Server 
 
